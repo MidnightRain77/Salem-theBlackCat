@@ -13,6 +13,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![greet])
+        .setup(|_app| {
+            // Transparency is configured via tauri.conf.json:
+            //   "transparent": true  +  "macOSPrivateApi": true
+            // and CSS: background: transparent
+            // No additional runtime setup needed.
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
