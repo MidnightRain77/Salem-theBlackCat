@@ -1,27 +1,65 @@
-import React from "react";
+import React, { useEffect, useCallback, useRef } from "react";
+import { SalemBody } from "./SalemBody.tsx";
+import { useDrag } from "../hooks/useDrag.ts";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export const Salem: React.FC = () => {
+  const { isDragging, stretchY, dragHandlers } = useDrag();
+  const isHoveringRef = useRef(false);
+
+  // Click-through: on mouseenter Salem, disable ignore so Salem is interactive;
+  // on mouseleave, re-enable ignore so the rest of the window is click-through.
+  const handleMouseEnter = useCallback(async () => {
+    isHoveringRef.current = true;
+    try {
+      await getCurrentWindow().setIgnoreCursorEvents(false);
+    } catch {
+      // Tauri API not available in browser dev
+    }
+  }, []);
+
+  const handleMouseLeave = useCallback(async () => {
+    isHoveringRef.current = false;
+    // Do not ignore cursor events while dragging, otherwise the drag freezes
+    if (isDragging) return;
+
+    try {
+      await getCurrentWindow().setIgnoreCursorEvents(true);
+    } catch {
+      // Tauri API not available in browser dev
+    }
+  }, [isDragging]);
+
+  // Restore ignore cursor events if the mouse left the pet during drag, and drag has now ended
+  useEffect(() => {
+    if (!isDragging && !isHoveringRef.current) {
+      getCurrentWindow().setIgnoreCursorEvents(true).catch(() => {});
+    }
+  }, [isDragging]);
+
+  // Set initial cursor ignore on mount (transparent areas are click-through)
+  useEffect(() => {
+    const init = async () => {
+      try {
+        await getCurrentWindow().setIgnoreCursorEvents(true);
+      } catch {
+        // Tauri API not available in browser dev
+      }
+    };
+    init();
+  }, []);
+
   return (
-    <svg
-      id="salem"
-      width="120"
-      height="120"
-      viewBox="0 0 120 120"
-      xmlns="http://www.w3.org/2000/svg"
+    <div
+      id="salem-wrapper"
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      onMouseDown={dragHandlers.onMouseDown}
+      onMouseMove={dragHandlers.onMouseMove}
+      onMouseUp={dragHandlers.onMouseUp}
+      style={{ cursor: "grab", userSelect: "none" }}
     >
-      {/* Placeholder: black circle to confirm transparency & rendering */}
-      <circle
-        id="salem-body"
-        cx="60"
-        cy="60"
-        r="55"
-        fill="#1a1a1a"
-        stroke="#333"
-        strokeWidth="2"
-      />
-      {/* Eyes — two small green dots so it reads as "cat" */}
-      <circle id="eye-left" cx="42" cy="50" r="5" fill="#39ff14" />
-      <circle id="eye-right" cx="78" cy="50" r="5" fill="#39ff14" />
-    </svg>
+      <SalemBody state="IDLE" stretchY={stretchY} />
+    </div>
   );
 };

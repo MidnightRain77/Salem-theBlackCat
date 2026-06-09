@@ -29,7 +29,7 @@ One active state at a time:
 6. DISAPPOINTED  — droop ears, slow head shake, slouch
 7. STARTLED      — sharp jump, puffed tail (fast click/poke)
 8. BEING_PETTED  — eyes close, purr lines, floating hearts
-9. BEING_DRAGGED — body stretches horizontally, stress lines
+9. BEING_DRAGGED — body stretches vertically, stress lines
 
 ## Event → State Transition Table
 | Event                              | → Salem State   |
@@ -55,7 +55,7 @@ Chrome extension → POST localhost:7821/event → Axum → Tauri emit() → Rea
 - Black cat, pure inline SVG, ~120px tall
 - Named SVG element IDs: #salem-body, #salem-head, #salem-tail,
   #ear-left, #ear-right, #eye-left, #eye-right, #mouth
-- Drag stretch: scaleX from 1.0 to max 2.5 based on drag distance
+- Drag stretch: scaleY from 1.0 to max 2.5 based on drag distance
 - Snap back on release: Framer Motion spring (stiffness 400, damping 20)
 
 ## Interaction Details
