@@ -1,143 +1,139 @@
-import { useRef, useCallback, useState, useEffect } from "react";
+import { useRef, useCallback, useEffect } from "react";
 import { useMotionValue, useSpring } from "framer-motion";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import { PhysicalPosition } from "@tauri-apps/api/dpi";
+import { getCurrentWindow, LogicalPosition } from "@tauri-apps/api/window";
+
+const DRAG_THRESHOLD_MS = 150;
+const MAX_SCALE_Y = 2.5;
+const MIN_SCALE_X = 0.75;
 
 /**
- * useDrag — handles dragging the Salem window around the screen.
+ * useDrag — handles drag-to-reposition Salem on screen with vertical stretch.
  *
- * On mousedown, records the cursor offset within the window.
- * While dragging, repositions the Tauri window and computes vertical stretch (scaleY)
- * based on drag velocity using global window mouse listeners.
- * On mouseup, spring-animates scaleY back to 1.0.
- *
- * Exports: { isDragging, stretchY, dragHandlers }
+ * Returns:
+ * - salemRef: attach to the Salem SVG wrapper element
+ * - scaleY / scaleX: Framer Motion motion values for body stretch
  */
 export const useDrag = () => {
-  const [isDragging, setIsDragging] = useState(false);
+  const salemRef = useRef<HTMLDivElement>(null);
 
-  // Raw motion value for scaleY — we drive this imperatively
-  const stretchRaw = useMotionValue(1.0);
+  // Track drag state
+  const isDragging = useRef(false);
+  const mouseDownTime = useRef(0);
+  const mouseDownScreenPos = useRef({ x: 0, y: 0 });
+  const windowStartPos = useRef({ x: 0, y: 0 });
 
-  // Spring-smoothed version (used during release snap-back)
-  const stretchY = useSpring(stretchRaw, {
-    stiffness: 400,
-    damping: 20,
-  });
+  // Framer Motion values for stretch
+  const rawScaleY = useMotionValue(1);
+  const rawScaleX = useMotionValue(1);
 
-  // Refs to track drag state without re-renders
-  const dragState = useRef({
-    active: false,
-    // Offset of cursor relative to window origin at drag start
-    offsetX: 0,
-    offsetY: 0,
-    // Previous cursor screen position (for velocity calc)
-    prevScreenX: 0,
-    prevScreenY: 0,
-    // Previous timestamp
-    prevTime: 0,
-  });
+  // Spring-animated values that snap back on release
+  const scaleY = useSpring(rawScaleY, { stiffness: 400, damping: 20 });
+  const scaleX = useSpring(rawScaleX, { stiffness: 400, damping: 20 });
 
-  const onMouseDown = useCallback(
-    async (e: React.MouseEvent) => {
+  const handleMouseDown = useCallback(
+    async (e: MouseEvent) => {
       e.preventDefault();
+      e.stopPropagation();
 
+      mouseDownTime.current = Date.now();
+      mouseDownScreenPos.current = { x: e.screenX, y: e.screenY };
+
+      // Capture the window's current position at drag start.
+      // outerPosition() returns PhysicalPosition — convert to logical
+      // so it matches screenX/screenY from DOM MouseEvent (CSS pixels).
       try {
-        const appWindow = getCurrentWindow();
-        const pos = await appWindow.outerPosition();
-
-        // The mouse event gives us client (within-window) coords.
-        // The window's screen position + the client offset = where mouse is on screen.
-        dragState.current = {
-          active: true,
-          offsetX: e.clientX,
-          offsetY: e.clientY,
-          prevScreenX: pos.x + e.clientX,
-          prevScreenY: pos.y + e.clientY,
-          prevTime: performance.now(),
-        };
-
-        setIsDragging(true);
-        stretchRaw.set(1.0);
+        const pos = await getCurrentWindow().outerPosition();
+        const scale = window.devicePixelRatio || 1;
+        windowStartPos.current = { x: pos.x / scale, y: pos.y / scale };
       } catch {
-        // If Tauri APIs aren't available (e.g., in browser dev), silently skip
+        windowStartPos.current = { x: 0, y: 0 };
       }
+
+      isDragging.current = false;
     },
-    [stretchRaw]
+    []
   );
 
-  // Global mousemove and mouseup handler during drag to prevent slipping/freezing
-  useEffect(() => {
-    if (!isDragging) return;
+  const handleMouseMove = useCallback(
+    (e: MouseEvent) => {
+      if (mouseDownTime.current === 0) return;
 
-    const handleMouseMove = async (e: MouseEvent) => {
-      if (!dragState.current.active) return;
+      const elapsed = Date.now() - mouseDownTime.current;
+      const deltaX = e.screenX - mouseDownScreenPos.current.x;
+      const deltaY = e.screenY - mouseDownScreenPos.current.y;
+      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
-      try {
-        const appWindow = getCurrentWindow();
-        const pos = await appWindow.outerPosition();
-        const screenX = pos.x + e.clientX;
-        const screenY = pos.y + e.clientY;
-
-        const newX = screenX - dragState.current.offsetX;
-        const newY = screenY - dragState.current.offsetY;
-
-        await appWindow.setPosition(new PhysicalPosition(newX, newY));
-
-        // Compute velocity for stretch
-        const now = performance.now();
-        const dt = now - dragState.current.prevTime;
-
-        if (dt > 0) {
-          const dx = screenX - dragState.current.prevScreenX;
-          const dy = screenY - dragState.current.prevScreenY;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          // Velocity in px/frame (~16ms per frame)
-          const velocityPxPerFrame = (dist / dt) * 16;
-
-          // Interpolate scaleY: 1.0 at 0 velocity → 2.2 at ~30px/frame, clamped at 2.5
-          const targetStretch = Math.min(
-            2.5,
-            1.0 + (velocityPxPerFrame / 30) * 1.2
-          );
-          stretchRaw.set(targetStretch);
+      // Only start dragging after threshold time + some movement
+      if (!isDragging.current) {
+        if (elapsed >= DRAG_THRESHOLD_MS && distance > 3) {
+          isDragging.current = true;
+        } else {
+          return;
         }
-
-        dragState.current.prevScreenX = screenX;
-        dragState.current.prevScreenY = screenY;
-        dragState.current.prevTime = now;
-      } catch {
-        // Silently handle Tauri API errors
       }
-    };
 
-    const handleMouseUp = () => {
-      if (!dragState.current.active) return;
+      // --- Update window position ---
+      // Use LogicalPosition so coordinates match the CSS-pixel screenX/screenY
+      const newX = windowStartPos.current.x + deltaX;
+      const newY = windowStartPos.current.y + deltaY;
+      getCurrentWindow()
+        .setPosition(new LogicalPosition(newX, newY))
+        .catch(() => {});
 
-      dragState.current.active = false;
-      setIsDragging(false);
-      stretchRaw.set(1.0);
-    };
+      // --- Calculate stretch ---
+      // Primary driver: Y-axis delta, secondary: X-axis contributes partially
+      const absDeltaY = Math.abs(deltaY);
+      const absDeltaX = Math.abs(deltaX);
 
+      // Combine Y and X (X contributes at 40% weight for diagonal drags)
+      const combinedDelta = absDeltaY + absDeltaX * 0.4;
+
+      // Map combined delta (0..200px) to scaleY (1.0..2.5)
+      const stretchFactor = Math.min(combinedDelta / 200, 1);
+      const targetScaleY = 1.0 + stretchFactor * (MAX_SCALE_Y - 1.0);
+
+      // Inverse compression on X: as scaleY grows, scaleX shrinks
+      // Map scaleY range [1.0, 2.5] to scaleX range [1.0, 0.75]
+      const compressionFactor = (targetScaleY - 1.0) / (MAX_SCALE_Y - 1.0);
+      const targetScaleX = 1.0 - compressionFactor * (1.0 - MIN_SCALE_X);
+
+      rawScaleY.set(Math.min(targetScaleY, MAX_SCALE_Y));
+      rawScaleX.set(Math.max(targetScaleX, MIN_SCALE_X));
+    },
+    [rawScaleX, rawScaleY]
+  );
+
+  const handleMouseUp = useCallback(() => {
+    if (isDragging.current) {
+      // Spring snap-back: set raw values back to 1.0,
+      // the useSpring will animate smoothly
+      rawScaleY.set(1.0);
+      rawScaleX.set(1.0);
+    }
+
+    isDragging.current = false;
+    mouseDownTime.current = 0;
+  }, [rawScaleX, rawScaleY]);
+
+  // Attach event listeners
+  useEffect(() => {
+    const el = salemRef.current;
+    if (!el) return;
+
+    // mousedown on the Salem element only
+    el.addEventListener("mousedown", handleMouseDown);
+
+    // mousemove and mouseup on the window so we don't lose the drag
+    // if the cursor leaves the element
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
+
     return () => {
+      el.removeEventListener("mousedown", handleMouseDown);
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, [isDragging, stretchRaw]);
+  }, [handleMouseDown, handleMouseMove, handleMouseUp]);
 
-  // Keep no-ops for onMouseMove/onMouseUp so client code using them doesn't break
-  const onMouseMove = useCallback(() => {}, []);
-  const onMouseUp = useCallback(() => {}, []);
-
-  return {
-    isDragging,
-    stretchY,
-    dragHandlers: {
-      onMouseDown,
-      onMouseMove,
-      onMouseUp,
-    },
-  };
+  return { salemRef, scaleX, scaleY };
 };

@@ -1,65 +1,75 @@
-import React, { useEffect, useCallback, useRef } from "react";
-import { SalemBody } from "./SalemBody.tsx";
-import { useDrag } from "../hooks/useDrag.ts";
+import React, { useEffect, useRef } from "react";
+import { motion } from "framer-motion";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { useDrag } from "../hooks/useDrag";
+import { SalemBody } from "./SalemBody";
 
+/**
+ * Salem — main component that renders the cat, applies drag interaction,
+ * and configures click-through behavior for the transparent window.
+ *
+ * Click-through strategy:
+ * On macOS with `transparent: true` + `macOSPrivateApi: true`, fully transparent
+ * pixels are natively click-through. We reinforce this by toggling
+ * setIgnoreCursorEvents on mouseenter/mouseleave of the Salem element.
+ * The window starts with cursor events ENABLED (so the webview can detect
+ * mouseenter in the first place), and the native transparency handles
+ * pass-through on empty areas.
+ */
 export const Salem: React.FC = () => {
-  const { isDragging, stretchY, dragHandlers } = useDrag();
-  const isHoveringRef = useRef(false);
+  const { salemRef, scaleX, scaleY } = useDrag();
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Click-through: on mouseenter Salem, disable ignore so Salem is interactive;
-  // on mouseleave, re-enable ignore so the rest of the window is click-through.
-  const handleMouseEnter = useCallback(async () => {
-    isHoveringRef.current = true;
-    try {
-      await getCurrentWindow().setIgnoreCursorEvents(false);
-    } catch {
-      // Tauri API not available in browser dev
-    }
-  }, []);
-
-  const handleMouseLeave = useCallback(async () => {
-    isHoveringRef.current = false;
-    // Do not ignore cursor events while dragging, otherwise the drag freezes
-    if (isDragging) return;
-
-    try {
-      await getCurrentWindow().setIgnoreCursorEvents(true);
-    } catch {
-      // Tauri API not available in browser dev
-    }
-  }, [isDragging]);
-
-  // Restore ignore cursor events if the mouse left the pet during drag, and drag has now ended
+  // Toggle cursor event handling based on whether mouse is over Salem
   useEffect(() => {
-    if (!isDragging && !isHoveringRef.current) {
-      getCurrentWindow().setIgnoreCursorEvents(true).catch(() => {});
-    }
-  }, [isDragging]);
+    const appWindow = getCurrentWindow();
+    const salemEl = salemRef.current;
+    if (!salemEl) return;
 
-  // Set initial cursor ignore on mount (transparent areas are click-through)
-  useEffect(() => {
-    const init = async () => {
-      try {
-        await getCurrentWindow().setIgnoreCursorEvents(true);
-      } catch {
-        // Tauri API not available in browser dev
-      }
+    // When mouse enters Salem, ensure cursor events are captured
+    const handleMouseEnter = () => {
+      appWindow.setIgnoreCursorEvents(false).catch(() => {});
     };
-    init();
-  }, []);
+
+    // When mouse leaves Salem, make window click-through
+    const handleMouseLeave = () => {
+      appWindow.setIgnoreCursorEvents(true).catch(() => {});
+    };
+
+    salemEl.addEventListener("mouseenter", handleMouseEnter);
+    salemEl.addEventListener("mouseleave", handleMouseLeave);
+
+    return () => {
+      salemEl.removeEventListener("mouseenter", handleMouseEnter);
+      salemEl.removeEventListener("mouseleave", handleMouseLeave);
+    };
+  }, [salemRef]);
 
   return (
     <div
-      id="salem-wrapper"
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      onMouseDown={dragHandlers.onMouseDown}
-      onMouseMove={dragHandlers.onMouseMove}
-      onMouseUp={dragHandlers.onMouseUp}
-      style={{ cursor: "grab", userSelect: "none" }}
+      ref={containerRef}
+      style={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        alignItems: "flex-end",
+        justifyContent: "center",
+        background: "transparent",
+        pointerEvents: "none",
+      }}
     >
-      <SalemBody state="IDLE" stretchY={stretchY} />
+      <motion.div
+        ref={salemRef}
+        style={{
+          scaleX,
+          scaleY,
+          transformOrigin: "center bottom",
+          cursor: "grab",
+          pointerEvents: "auto",
+        }}
+      >
+        <SalemBody state="IDLE" />
+      </motion.div>
     </div>
   );
 };
