@@ -13,11 +13,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![greet])
-        .setup(|_app| {
+        .setup(|app| {
             // Transparency is configured via tauri.conf.json:
             //   "transparent": true  +  "macOSPrivateApi": true
             // and CSS: background: transparent
-            // No additional runtime setup needed.
+
+            // Start global keyboard monitor (rdev) on a background thread
+            input_monitor::start_input_monitor(app.handle().clone());
+
             Ok(())
         })
         .run(tauri::generate_context!())

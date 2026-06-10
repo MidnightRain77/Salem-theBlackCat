@@ -1,7 +1,8 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useCallback } from "react";
 import { motion } from "framer-motion";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useDrag } from "../hooks/useDrag";
+import { useSalemState } from "../hooks/useSalemState";
 import { SalemBody } from "./SalemBody";
 
 /**
@@ -17,8 +18,19 @@ import { SalemBody } from "./SalemBody";
  * pass-through on empty areas.
  */
 export const Salem: React.FC = () => {
-  const { salemRef, scaleX, scaleY } = useDrag();
   const containerRef = useRef<HTMLDivElement>(null);
+  const { state, transitionTo } = useSalemState();
+  const { salemRef, dragStretch, isPetting, isPoked } = useDrag(transitionTo);
+  const { scaleX, scaleY } = dragStretch;
+
+  // isPetting and isPoked are available for child components / future use
+  void isPetting;
+  void isPoked;
+
+  // Handle celebration sequence complete → auto-transition back to IDLE
+  const handleCelebrationComplete = useCallback(() => {
+    transitionTo("IDLE");
+  }, [transitionTo]);
 
   // Toggle cursor event handling based on whether mouse is over Salem
   useEffect(() => {
@@ -68,7 +80,10 @@ export const Salem: React.FC = () => {
           pointerEvents: "auto",
         }}
       >
-        <SalemBody state="IDLE" />
+        <SalemBody
+          state={state}
+          onCelebrationComplete={handleCelebrationComplete}
+        />
       </motion.div>
     </div>
   );
