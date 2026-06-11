@@ -200,6 +200,15 @@ export const useSalemState = (): {
     [cancelAutoExit, cancelIdleTimers, startIdleTimers, startAutoExit]
   );
 
+  // --- Initialize idle timers on mount ---
+  // Without this, THINKING and SLEEPING transitions won't fire until
+  // the first keypress arrives.
+  useEffect(() => {
+    lastKeypressTime.current = performance.now();
+    startIdleTimers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // --- Cleanup on unmount ---
   useEffect(() => {
     return () => {

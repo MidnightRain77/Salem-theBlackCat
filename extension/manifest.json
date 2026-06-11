@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Salem Connector",
+  "version": "1.0",
+  "description": "Connects LeetCode and InterviewBit results to Salem the desktop cat",
+  "permissions": ["activeTab"],
+  "host_permissions": ["http://127.0.0.1:7821/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://leetcode.com/*",
+        "*://www.interviewbit.com/*"
+      ],
+      "js": ["content.js"]
+    }
+  ]
+}
